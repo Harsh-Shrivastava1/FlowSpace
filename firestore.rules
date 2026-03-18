@@ -1,0 +1,53 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isLoggedIn() {
+      return request.auth != null;
+    }
+
+    // Admin doc id must match Firebase Auth uid.
+    function isAdmin() {
+      return isLoggedIn() &&
+        exists(/databases/$(database)/documents/adminAuth/$(request.auth.uid));
+    }
+
+    function isOwner(userId) {
+      return isLoggedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      allow create, read, update: if isOwner(userId);
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    match /resources/{resourceId} {
+      allow read: if isLoggedIn();
+      allow create, delete: if isAdmin();
+
+      // Keep this broad for current booking flow (bookResource/freeResource updates).
+      allow update: if isLoggedIn();
+    }
+
+    match /bookings/{bookingId} {
+      allow create: if isLoggedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == "pending";
+
+      // BookingContext listens to full bookings collection, then filters on client.
+      allow read: if isLoggedIn();
+
+      allow update, delete: if isAdmin();
+    }
+
+    match /adminAuth/{adminId} {
+      // Recommended secure mode: only the authenticated admin can read own doc.
+      allow read: if isLoggedIn() && request.auth.uid == adminId;
+      allow write: if false;
+
+      // Legacy compatibility mode for ID/password admin login (NOT recommended):
+      // allow read: if true;
+    }
+  }
+}
